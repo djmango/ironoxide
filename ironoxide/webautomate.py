@@ -1,9 +1,11 @@
+from distutils.log import debug
 import json
 import logging
 import pickle
 from pathlib import Path
 import re
 from select import select
+from typing import Iterable
 
 import undetected_chromedriver as uc
 from bs4 import BeautifulSoup
@@ -22,6 +24,41 @@ logging.basicConfig(level=settings.LOGGING_LEVEL, format=('%(asctime)s %(levelna
 
 creds = json.load(open(HERE.parent/'data'/'creds.json'))
 
+def getValidSelection(selectables: list[str], query_string: str, default_selection_i: int = 0) -> int:
+    """_summary_
+
+    Args:
+        selectables (list[str]): List of strings to be chosen from.
+        query_string (str): What to ask the user in the input prompt.
+        default_selection_i (int, optional): Default selection if in debug or no input given. Defaults to 0.
+
+    Returns:
+        int: Index of the selected option
+    """
+
+    for i, selectable in enumerate(selectables):
+        print(f'{i}: {selectable}')
+
+    # ensure we get a valid selection
+    while True:
+        # dont wanna input when im debugging
+        if settings.DEBUG:
+            selection = default_selection_i
+        else:
+            selection = input(f"{query_string} [{default_selection_i}]: ")
+
+        # default
+        if selection == '':
+            selection = default_selection_i
+
+        try:
+            selection = int(selection)
+            if selection in range(0, len(selectables)):
+                break
+            print(f"Chose {selectables[selection]}")
+            return selection
+        except:
+            print(f'ERROR: selection must be an integer from 0 to {len(selectables)-1}')
 
 def main():
     driver = uc.Chrome(use_subprocess=True)
@@ -69,24 +106,7 @@ def main():
         print(f'{i}: {course["title"]}')
 
     # ensure we get a valid selection
-    while True:
-        # dont wanna input when im debugging
-        if settings.DEBUG:
-            selection = 1
-        else:
-            selection = input('Select course: ')
-
-        # default
-        if selection == '':
-            selection = 0
-
-        try:
-            selection = int(selection)
-            if selection in range(0, len(courses)):
-                break
-        except:
-            print(f'ERROR: selection must be an integer from 0 to {len(courses)-1}')
-
+    selection = getValidSelection([x['title'] for x in courses], 'Select course', 0)
     course = courses[selection]
     print(f'\nSelected {course["title"]}!')
 
@@ -101,12 +121,11 @@ def main():
 
     for activity in activities:
         if 'online tests and evaluation' in str(activity['element'].text).lower():
-            test_activity: BeautifulSoup = activity
+            test_activity = activity
             break
     else:
-        # TODO: make a function that takes a list and gets valid user selection, use it for this and the course selection
-        print('Online Tests and Evaluation not found, exiting')
-        driver.quit()
+        selection = getValidSelection([x['title'] for x in activities], 'Online Tests and Evaluation not found, please select manually or exit')
+        test_activity = activities[selection]
 
     # expand test panel if not already expanded
     the_toggle = test_activity['element'].find('span', {'class': 'the_toggle'})
