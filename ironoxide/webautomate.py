@@ -26,11 +26,11 @@ class IU_PageElement():
     def __init__(self, title: str, element: BeautifulSoup):
         self.title = title
         self.element = element
+        self.url = element['href'] if 'href' in element.attrs else None
 
 class Course(IU_PageElement):
     def __init__(self, title: str, element: BeautifulSoup):
         super().__init__(title, element)
-        self.url = element['href']
 
     # -- Course Subclasses --
     class Test(IU_PageElement):
@@ -39,6 +39,7 @@ class Course(IU_PageElement):
             self.course: Course = course
             self.completable = completable
             self.completed = completed
+            self.questions: list[Course.Test.Question]
 
         class Question(IU_PageElement):
             def __init__(self, test, title: str, element: BeautifulSoup):
@@ -56,7 +57,6 @@ class Course(IU_PageElement):
             # wait for load
             test_main_page = BeautifulSoup(WebDriverWait(driver, TIMEOUT).until(ec.presence_of_element_located((By.XPATH, "//div[contains(@role, 'main')]"))).get_attribute('innerHTML'), features='lxml')
 
-            e = test_main_page.find('div', {'class': 'quizinfo'})
             # ensure we are in a Highest Grade test and proceed
             if  'Grading method: Highest grade' not in test_main_page.find('div', {'class': 'quizinfo'}).text:
                 logger.error(f'Not in a Highest Grade test ({self.title}), unsafe to continue, exiting..')
@@ -64,8 +64,18 @@ class Course(IU_PageElement):
             
             # proceed into the test
             driver.find_element(By.XPATH, "//button[contains(@type, 'submit')]").click()
-            # NOTE for next time to pick up on, so we now need to populate the questions and answers, and create a method to select them. after that we need to store the selected answers in a csv file. or somethign. data storage is two sessions down the line.
 
+            # populate questions
+            question_navigation_block = BeautifulSoup(WebDriverWait(driver, TIMEOUT).until(ec.presence_of_element_located((By.XPATH, "//div[contains(@class, 'qn_buttons clearfix multipages')]"))).get_attribute('innerHTML'), features='lxml')
+            self.questions = [Course.Test.Question(self, i, x) for i, x in enumerate(list(question_navigation_block.find_all('a')))]
+
+            # go to each question page and populate answers
+            for i, question in enumerate(self.questions):
+                logger.info(f'Question {i+1}/{len(self.questions)}')
+                driver.get(question.url)
+                print('e')
+            # NOTE for next time to pick up on, so we now need to populate the questions and answers, and create a method to select them. after that we need to store the selected answers in a csv file. or somethign. data storage is two sessions down the line.
+            # one more thing, id like to add colour to the logging
 
     # -- Course Methods --
     def populate_tests(self, driver: uc.Chrome):
@@ -194,7 +204,7 @@ def main():
 
     # -- Course --
     # Go to course page
-    logger.info('Going to course page..')
+    logger.info(f'Navigating to {course.title}..')
     driver.get(str(course.url))
     
     # get tests
