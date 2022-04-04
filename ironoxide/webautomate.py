@@ -1,11 +1,7 @@
-from distutils.log import debug
 import json
 import logging
 import pickle
 from pathlib import Path
-import re
-from select import select
-from typing import Iterable
 
 import undetected_chromedriver as uc
 from bs4 import BeautifulSoup
@@ -20,9 +16,21 @@ from ironoxide import settings
 HERE = Path(__file__).parent
 TIMEOUT = 3  # in seconds
 logger = logging.getLogger(__file__)
-logging.basicConfig(level=settings.LOGGING_LEVEL, format=('%(asctime)s %(levelname)s %(name)s | %(message)s'))
+# https://stackoverflow.com/questions/533048/how-to-log-source-file-name-and-line-number-in-python
+logging.basicConfig(level=settings.LOGGING_LEVEL, format=('%(asctime)s %(levelname)s %(module)s | %(message)s'))
 
 creds = json.load(open(HERE.parent/'data'/'creds.json'))
+
+class IU_PageElement():
+    def __init__(self, title: str, element: BeautifulSoup):
+        self.title = title
+        self.element = element
+
+class IU_Test(IU_PageElement):
+    def __init__(self, title: str, element: BeautifulSoup, completable: bool = False, completed: bool = False):
+        super().__init__(title, element)
+        self.completable = completable
+        self.completed = completed
 
 def getValidSelection(selectables: list[str], query_string: str, default_selection_i: int = 0) -> int:
     """_summary_
@@ -36,6 +44,8 @@ def getValidSelection(selectables: list[str], query_string: str, default_selecti
         int: Index of the selected option
     """
 
+    # display titles to the user
+    print('\n\n')
     for i, selectable in enumerate(selectables):
         print(f'{i}: {selectable}')
 
@@ -54,10 +64,10 @@ def getValidSelection(selectables: list[str], query_string: str, default_selecti
         try:
             selection = int(selection)
             if selection in range(0, len(selectables)):
-                break
-            print(f"Chose {selectables[selection]}")
-            return selection
-        except:
+                print(f"Selected {selectables[selection]}!")
+                return selection
+        except Exception as e:
+            print(e)
             print(f'ERROR: selection must be an integer from 0 to {len(selectables)-1}')
 
 def main():
@@ -100,15 +110,9 @@ def main():
     coursesPane = BeautifulSoup(WebDriverWait(driver, TIMEOUT).until(ec.presence_of_element_located((By.ID, 'courses-active'))).get_attribute('innerHTML'), features='lxml')
     courses = [{'title': str(x.text).strip().split('\n')[1], 'element': x} for x in list(coursesPane.find_all('a', {'class': 'courseitem'}))]
 
-    # display titles to the user
-    print('\n\n')
-    for i, course in enumerate(courses):
-        print(f'{i}: {course["title"]}')
-
     # ensure we get a valid selection
-    selection = getValidSelection([x['title'] for x in courses], 'Select course', 0)
+    selection = getValidSelection(([x['title'] for x in courses]), 'Select course', 0)
     course = courses[selection]
-    print(f'\nSelected {course["title"]}!')
 
     # -- Course --
     # go to course page
@@ -117,27 +121,59 @@ def main():
 
     # find ONLINE TESTS AND EVALUATION
     activitiesPane = BeautifulSoup(WebDriverWait(driver, TIMEOUT).until(ec.presence_of_element_located((By.XPATH, "//ul[contains(@class, 'ctopics topics bsnewgrid row')]"))).get_attribute('innerHTML'), features='lxml')
-    activities = [{'title': str(x.find('h3', {'class': 'sectionname'}).text).strip(), 'element': x} for x in list(activitiesPane.find_all('li', {'class': ['section', 'main']}))]
+    activities = [IU_PageElement(str(x.find('h3', {'class': 'sectionname'}).text).strip(), x) for x in list(activitiesPane.find_all('li', {'class': ['section', 'main']}))]
 
     for activity in activities:
-        if 'online tests and evaluation' in str(activity['element'].text).lower():
+        if 'online tests and evaluation' in str(activity.element.text).lower():
             test_activity = activity
             break
     else:
-        selection = getValidSelection([x['title'] for x in activities], 'Online Tests and Evaluation not found, please select manually or exit')
+        selection = getValidSelection([x.title for x in activities], 'Online Tests and Evaluation not found, please select manually or exit')
         test_activity = activities[selection]
 
     # expand test panel if not already expanded
-    the_toggle = test_activity['element'].find('span', {'class': 'the_toggle'})
+    the_toggle = test_activity.element.find('span', {'class': 'the_toggle'})
     if the_toggle['aria-expanded'] == 'false':
         logger.info('Expanding tests panel..')
         element = driver.find_element(By.ID, the_toggle['id'])
         element.click()
 
     # get list of tests and test titles from test panel
-    tests = [{'title': str(x.find('span', {'class': 'instancename'}).text).strip(), 'element': x} for x in list(test_activity['element'].find('ul', {'class': ['section', 'img-text']}).find_all('li'))]
+    tests = [IU_Test(str(x.find('span', {'class': 'instancename'}).text).strip(), x) for x in list(test_activity.element.find('ul', {'class': ['section', 'img-text']}).find_all('li'))]
     
-    # okay so NOTE s to pick up on next time, we need to figure out which courses have been completed and which havent, can use the image alt text and look for Passing grade
+    # check if any tests are completed. this could be done inline but that becomes hard to read.
+    for test in tests:
+        # ensure we can complete this test
+        if test.element.find('div', {'class': 'availabilityinfo isrestricted'}) is None and test.element.find('span', {'class': 'autocompletion'}) is not None:
+            logger.info(f'{test.title} is completable..')
+            test.completable = True
+            # then check if it is completed
+            if test.element.find('span', {'class': 'autocompletion'}).text[:10] == 'Completed:':
+                logger.info(f'{test.title} is completed!')
+                test.completed = True
+            else:
+                logger.info(f'{test.title} is not completed..')
+        else:
+            logger.info(f'{test.title} is not completable..')
+
+
+    # go to the first incomplete test
+    for test in tests:
+        if test.completable and not test.completed:
+            logger.info(f'Going to test {test.title}..')
+            driver.get(str(test.element.find('a')['href']))
+            break
+
+    # -- Test --
+
+    # ensure we are in a Highest Grade test and proceed
+    if 'Grading method: Highest grade' not in test.element.find('div', {'role': 'main'}).text:
+        logger.error(f'Not in a Highest Grade test ({test.title}), unsafe to continue, exiting..')
+        driver.quit()
+    
+    # proceed into the test
+    driver.find_element(By.XPATH, "//button[contains(@type, 'submit')]").click()
+
     logger.info('Done!')
     driver.quit()
 
