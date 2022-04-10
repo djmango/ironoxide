@@ -5,6 +5,7 @@ from pathlib import Path
 
 import undetected_chromedriver as uc
 from bs4 import BeautifulSoup
+from urllib.parse import urljoin
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as ec
@@ -24,34 +25,51 @@ creds = json.load(open(HERE.parent/'data'/'creds.json'))
 
 class IU_PageElement():
     def __init__(self, title: str, element: BeautifulSoup):
-        self.title = title
+        self.title = str(title)
         self.element = element
         self.url = element['href'] if 'href' in element.attrs else None
 
 class Course(IU_PageElement):
     def __init__(self, title: str, element: BeautifulSoup):
         super().__init__(title, element)
+    
+    def __repr__(self) -> str:
+        return f'<{self.__class__.__name__} {self.title}>'
 
     # -- Course Subclasses --
     class Test(IU_PageElement):
         def __init__(self, course, title: str, element: BeautifulSoup, completable: bool = False, completed: bool = False):
             super().__init__(title, element)
             self.course: Course = course
+            self.id = self.element.attrs['id']
             self.completable = completable
             self.completed = completed
             self.questions: list[Course.Test.Question]
+        
+        def __repr__(self) -> str:
+            return f'<{self.__class__.__name__} {self.title}>'
 
         class Question(IU_PageElement):
             def __init__(self, test, title: str, element: BeautifulSoup):
                 super().__init__(title, element)
                 self.test: Course.Test = test
+                self.text: str
                 self.answered = False
+                self.answers: list[Course.Test.Question.Answer]
 
-                class Answer(IU_PageElement):
-                    def __init__(self, question, title: str, element: BeautifulSoup):
-                        super().__init__(title, element)
-                        self.question: Course.Test.Question = question
-                        self.correct = False
+            def __repr__(self) -> str:
+                    return str(self.text)
+
+            class Answer(IU_PageElement):
+                def __init__(self, question, title: str, element: BeautifulSoup):
+                    super().__init__(title, element)
+                    self.question: Course.Test.Question = question
+                    self.text = element.text
+                    self.correct = False
+                    self.verified = False
+
+                def __repr__(self) -> str:
+                    return f'<{self.__class__.__name__} {self.text}>'
 
         def do_test(self, driver: uc.Chrome):
             # wait for load
@@ -69,11 +87,23 @@ class Course(IU_PageElement):
             question_navigation_block = BeautifulSoup(WebDriverWait(driver, TIMEOUT).until(ec.presence_of_element_located((By.XPATH, "//div[contains(@class, 'qn_buttons clearfix multipages')]"))).get_attribute('innerHTML'), features='lxml')
             self.questions = [Course.Test.Question(self, i, x) for i, x in enumerate(list(question_navigation_block.find_all('a')))]
 
+            # make sure all the question urls are fully qualified
+            for i, question in enumerate(self.questions):
+                if not question.url.startswith('https://'):
+                    question.url = self.questions[i-1].url.rsplit('&')[0] + f'&page={i}'
+
             # go to each question page and populate answers
             for i, question in enumerate(self.questions):
                 logger.info(f'Question {i+1}/{len(self.questions)}')
                 driver.get(question.url)
-                print('e')
+                question_block = BeautifulSoup(WebDriverWait(driver, TIMEOUT).until(ec.presence_of_element_located((By.XPATH, "//div[contains(@class, 'formulation clearfix')]"))).get_attribute('innerHTML'), features='lxml')
+                question.text = question_block.find('div', {'class': 'qtext'}).text
+                answer_block = question_block.find('div', {'class': 'answer'})
+                self.answers = [Course.Test.Question.Answer(question, i, x) for i, x in enumerate(list(answer_block.find_all('div')))]
+
+                # now its time to get the answer from our answering machine
+                logger.info(f'Getting answer for question {i+1}/{len(self.questions)}')
+
             # NOTE for next time to pick up on, so we now need to populate the questions and answers, and create a method to select them. after that we need to store the selected answers in a csv file. or somethign. data storage is two sessions down the line.
             # one more thing, id like to add colour to the logging
 
