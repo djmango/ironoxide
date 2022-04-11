@@ -9,12 +9,15 @@ import os
 from pathlib import Path
 from time import perf_counter
 
-start_time = perf_counter()
 import ironoxide
+from ironoxide import convert, filemanager
+
+start_time = perf_counter()
 
 logging.basicConfig(level=logging.DEBUG, format=('%(asctime)s %(levelname)s %(name)s | %(message)s'))
 logger = logging.getLogger('ironoxide-cli')
 logger.info('Found ironoxide at ' + str(Path(ironoxide.__file__)))
+
 
 def is_valid_file(parser, arg):
     if not os.path.isfile(arg):
@@ -22,15 +25,15 @@ def is_valid_file(parser, arg):
     else:
         return arg
 
+
 parser = argparse.ArgumentParser(description='i am ironoxide')
-parser.add_argument('--convert', '-c', help='converts provided context pdf and uploads to OpenAI document, and assosiates with provided course',
-    required=False, metavar="FILE", type=lambda x: is_valid_file(parser, x))
+parser.add_argument('--convert', '-c', help='Converts provided context pdf to jsonl and uploads to OpenAI, and assosiates with provided course', required=False, metavar="FILE", type=lambda x: is_valid_file(parser, x))
 
 args = parser.parse_args()
 
 if args:
     if args.convert is not None:
-        logger.info(args.convert)
+        convert.main(args.convert)
 
 logger.info(f"executed in {round(perf_counter() - start_time, 3)}s")
 

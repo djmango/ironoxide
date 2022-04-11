@@ -9,8 +9,10 @@ from ironoxide import settings
 
 HERE = Path(__file__).parent
 
-logging.basicConfig(level=settings.LOGGING_LEVEL, format=('%(asctime)s %(levelname)s %(name)s | %(message)s'))
+logging.basicConfig(level=settings.LOGGING_LEVEL_ROOT, format=('%(asctime)s %(levelname)s %(name)s | %(message)s'))
 logger = logging.getLogger(__file__)
+logger.setLevel(settings.LOGGING_LEVEL_MODULE)
+
 
 def upload(file_path):
     headers = {'Authorization': f'Bearer {settings.OPENAI_API_KEY}'}
@@ -19,5 +21,6 @@ def upload(file_path):
     e = r.json()
     print(e)
 
+
 if __name__ == '__main__':
-    upload(HERE.parent/'data'/'output.jsonl')
+    upload(settings.DATA_PATH/'output.jsonl')

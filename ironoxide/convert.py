@@ -1,40 +1,51 @@
 import json
 import logging
-from pathlib import Path
 import time
+from multiprocessing.pool import Pool
+from pathlib import Path
 
+import pdfplumber
 import pytesseract
 from pdf2image import convert_from_path
-import pdfplumber
-from multiprocessing.pool import Pool
 
 from ironoxide import settings, utils
 
 HERE = Path(__file__).parent
 
-logging.basicConfig(level=settings.LOGGING_LEVEL, format=('%(asctime)s %(levelname)s %(name)s | %(message)s'))
+logging.basicConfig(level=settings.LOGGING_LEVEL_ROOT, format=('%(asctime)s %(levelname)s %(name)s | %(message)s'))
+logging.getLogger('pdfminer').setLevel(logging.WARNING)  # for some reason it logs so much random stuff to info
 logger = logging.getLogger(__file__)
+logger.setLevel(settings.LOGGING_LEVEL_MODULE)
+
 
 def ocr(image):
     return pytesseract.image_to_string(image, lang='eng', config=f"--oem 1")
 
+
 def main(file_path, ocr=False):
-    logger.info(f'Converting {file_path} to json')
+    """ Converts a pdf to a jsonl file
+
+    Args:
+        file_path (PosixPath, str): Absolute path to the pdf file
+        ocr (bool, optional): If the OCR method should be used to extract text instead of the pdfminer method. Defaults to False.
+    """
+
+    logger.info(f'Converting {file_path} to jsonl')
 
     MIN_WORDS = 5
     OCR_PROCESSES = 8
-    
+
     start = time.perf_counter()
     if ocr:
         # Convert pdf to images to be OCR'd by tesseract
         pages = convert_from_path(file_path)
-        logger.info(f'Converted to images in {time.perf_counter() - start:.3f}s')
+        logger.debug(f'Converted to images in {time.perf_counter() - start:.3f}s')
 
         # OCR using tesseract with multithreading
         p = Pool(processes=OCR_PROCESSES)
         pages_text = p.map(ocr, pages)
         fulltext = '\n'.join(pages_text)
-        logger.info(f'OCR\'d in {time.perf_counter() - start:.3f}s')
+        logger.debug()(f'OCR\'d in {time.perf_counter() - start:.3f}s')
 
     else:
         fulltext = ''
@@ -48,12 +59,15 @@ def main(file_path, ocr=False):
         for sentence in sentences:
             if len(sentence.split(' ')) > MIN_WORDS:
                 output.append({'text': utils.clean_str(sentence)})
-        logger.info(f'Got PDF text in {time.perf_counter() - start:.3f}s')
+        logger.debug(f'Got PDF text in {time.perf_counter() - start:.3f}s')
 
-    with open(HERE.parent/'data'/'output.jsonl', 'w') as f:
+    output_path = settings.DATA_PATH/'output.jsonl'
+    with open(output_path, 'w') as f:
         for line in output:
             f.write(json.dumps(line) + '\n')
-    logger.info(f'Saved output in {time.perf_counter() - start:.3f}s')
+    logger.debug(f'Saved output in {time.perf_counter() - start:.3f}s')
+    return str(output_path)
+
 
 if __name__ == '__main__':
     main(HERE.parent/'pycoursebook.pdf')

@@ -3,6 +3,7 @@ from pathlib import Path
 
 import undetected_chromedriver as uc
 from bs4 import BeautifulSoup
+from django.db import models
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as ec
@@ -13,9 +14,10 @@ from ironoxide import settings
 # setup
 HERE = Path(__file__).parent
 TIMEOUT = 3  # in seconds
-logger = logging.getLogger(__file__)
 # https://stackoverflow.com/questions/533048/how-to-log-source-file-name-and-line-number-in-python
-logging.basicConfig(level=settings.LOGGING_LEVEL, format=('%(asctime)s %(levelname)s %(module)s | %(message)s'))
+logging.basicConfig(level=settings.LOGGING_LEVEL_ROOT, format=('%(asctime)s %(levelname)s %(module)s | %(message)s'))
+logger = logging.getLogger(__file__)
+logger.setLevel(settings.LOGGING_LEVEL_MODULE)
 
 class IU_PageElement():
     def __init__(self, title: str, element: BeautifulSoup):
