@@ -1,11 +1,8 @@
-import json
 import logging
-import pickle
 from pathlib import Path
 
 import undetected_chromedriver as uc
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as ec
@@ -19,9 +16,6 @@ TIMEOUT = 3  # in seconds
 logger = logging.getLogger(__file__)
 # https://stackoverflow.com/questions/533048/how-to-log-source-file-name-and-line-number-in-python
 logging.basicConfig(level=settings.LOGGING_LEVEL, format=('%(asctime)s %(levelname)s %(module)s | %(message)s'))
-
-creds = json.load(open(HERE.parent/'data'/'creds.json'))
-
 
 class IU_PageElement():
     def __init__(self, title: str, element: BeautifulSoup):
@@ -202,10 +196,11 @@ def main():
         except TimeoutException:
             logger.error("Loading took too much time!")
         # Fill in user & pass fields
-        for fieldName in ['username', 'password']:  # fill in user and password
-            field = driver.find_element(By.ID, fieldName)
+        for fieldname in ['username', 'password']:  # fill in user and password
+            keys = settings.USERNAME if fieldname == 'username' else settings.PASSWORD
+            field = driver.find_element(By.ID, fieldname)
             field.clear()
-            field.send_keys(creds[fieldName])
+            field.send_keys(keys)
         # hit login
         driver.find_element(By.ID, 'loginbtn').click()
         logger.info('Logged in!')
