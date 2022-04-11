@@ -1,17 +1,27 @@
-############################################################################
-## Django ORM Standalone Python Template
-############################################################################
-""" Here we'll import the parts of Django we need. It's recommended to leave
-these settings as is, and skip to START OF APPLICATION section below """
+import sys
 
 # Turn off bytecode generation
-import sys
 sys.dont_write_bytecode = True
 
-# Django specific settings
 import os
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'ironoxide.settings')
-import django
-django.setup()
+import argparse
 
-# main
+# Django specific settings
+# https://github.com/dancaron/Django-ORM
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'ironoxide.settings')
+import ironoxide.settings
+# import django
+
+# django.setup()
+
+from ironoxide import convert
+
+def cli(args: argparse.Namespace):
+    """
+    This is the main function that will be called when the script is run.
+    """
+
+    if args.convert:
+        # path should already be validated
+        convert(args.convert)
+        # upload and associate with course

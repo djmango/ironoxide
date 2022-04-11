@@ -9,8 +9,7 @@ import os
 from pathlib import Path
 from time import perf_counter
 
-import ironoxide
-from ironoxide import convert, filemanager
+from ironoxide import __main__ as ironoxide
 
 start_time = perf_counter()
 
@@ -32,8 +31,7 @@ parser.add_argument('--convert', '-c', help='Converts provided context pdf to js
 args = parser.parse_args()
 
 if args:
-    if args.convert is not None:
-        convert.main(args.convert)
+    ironoxide.cli(args)
 
 logger.info(f"executed in {round(perf_counter() - start_time, 3)}s")
 

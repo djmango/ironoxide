@@ -5,6 +5,7 @@ import logging
 import os
 
 # setup
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'ironoxide.settings')
 HERE = Path(__file__).parent
 DATA_PATH = HERE/'data'
 LOGGING_LEVEL_ROOT = logging.INFO
@@ -32,3 +33,6 @@ DATABASES = {
 }
 
 INSTALLED_APPS = ['ironoxide']
+
+import django
+django.setup()

@@ -132,3 +132,4 @@ creds.json
 *.pkl
 *.pdf
 *.jsonl
+.DS_Store
