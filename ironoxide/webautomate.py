@@ -38,7 +38,7 @@ def populate_tests(course: Course, driver: uc.Chrome):
     # Expand test panel if not already expanded
     the_toggle = test_activity['element'].find('span', {'class': 'the_toggle'})
     if the_toggle['aria-expanded'] == 'false':
-        logger.info('Expanding tests panel..')
+        logger.debug('Expanding tests panel..')
         element = driver.find_element(By.ID, the_toggle['id'])
         element.click()
 
@@ -48,18 +48,18 @@ def populate_tests(course: Course, driver: uc.Chrome):
     # Check if any tests are completed. If so, mark them as such
     for test in tests:
         # ensure we can complete this test
-        if test.element.find('div', {'class': 'availabilityinfo isrestricted'}) is None and test.element.find('span', {'class': 'autocompletion'}) is not None:
-            logger.info(f'{test.title} is completable..')
+        if test.getElement().find('div', {'class': 'availabilityinfo isrestricted'}) is None and test.getElement().find('span', {'class': 'autocompletion'}) is not None:
+            logger.debug(f'{test.title} is completable..')
             test.completable = True
             # then check if it is completed
-            completion = next(test.element.find('span', {'class': 'autocompletion'}).children).attrs['alt']
-            if next(test.element.find('span', {'class': 'autocompletion'}).children).attrs['alt'][:10] == 'Completed:':
-                logger.info(f'{test.title} is completed!')
+            # completion = next(test.getElement().find('span', {'class': 'autocompletion'}).children).attrs['alt']
+            if next(test.getElement().find('span', {'class': 'autocompletion'}).children).attrs['alt'][:10] == 'Completed:':
+                logger.debug(f'{test.title} is completed!')
                 test.completed = True
             else:
-                logger.info(f'{test.title} is not completed..')
+                logger.debug(f'{test.title} is not completed..')
         else:
-            logger.info(f'{test.title} is not completable..')
+            logger.debug(f'{test.title} is not completable..')
 
         test.save()
     return tests
@@ -82,12 +82,12 @@ def do_test(test: Test, driver: uc.Chrome):
 
     # make sure all the question urls are fully qualified
     for i, question in enumerate(questions):
-        if not question.url.startswith('https://'):
-            question.url = questions[i-1].url.rsplit('&')[0] + f'&page={i}'
+        if not question.url or not question.url.startswith('https://'):
+            question.url = questions[i-1].url.rsplit('&')[0] + f'&page={i}' # NOTE: potentially, the first element could have the broken url, which means that this fix will not work as expected. have to add conditional
 
     # go to each question page and populate answers
     for i, question in enumerate(questions):
-        logger.info(f'Question {i+1}/{len(questions)}')
+        logger.debug(f'Question {i+1}/{len(questions)}')
         driver.get(question.url)
         question_block = BeautifulSoup(WebDriverWait(driver, TIMEOUT).until(ec.presence_of_element_located((By.XPATH, "//div[contains(@class, 'formulation clearfix')]"))).get_attribute('innerHTML'), features='lxml')
         question.text = question_block.find('div', {'class': 'qtext'}).text
@@ -96,7 +96,7 @@ def do_test(test: Test, driver: uc.Chrome):
         answers = [Answer.create(question, i, x) for i, x in enumerate(list(answer_block.find_all('div')))]
 
         # now its time to get the answer from our answering machine
-        logger.info(f'Getting answer for question {i+1}/{len(questions)}')
+        logger.debug(f'Getting answer for question {i+1}/{len(questions)}')
 
         # NOTE for next time to pick up on, so we now need to populate the questions and answers, and create a method to select them. after that we need to store the selected answers in a csv file. or somethign. data storage is two sessions down the line.
         # one more thing, id like to add colour to the logging
@@ -200,7 +200,7 @@ def main():
     for test in tests:
         if test.completable and not test.completed:
             logger.info(f'Going to test {test.title}..')
-            driver.get(str(test.element.find('a')['href']))
+            driver.get(str(test.getElement().find('a')['href']))
             break
 
     # -- Test --
