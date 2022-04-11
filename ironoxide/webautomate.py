@@ -14,7 +14,6 @@ from ironoxide.models import Answer, Course, Question, Test
 # setup
 HERE = Path(__file__).parent
 TIMEOUT = 3  # in seconds
-# https://stackoverflow.com/questions/533048/how-to-log-source-file-name-and-line-number-in-python
 logger = logging.getLogger(__file__)
 logger.setLevel(settings.LOGGING_LEVEL_MODULE)
 

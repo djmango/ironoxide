@@ -46,12 +46,14 @@ USE_L10N = True
 USE_TZ = True
 
 # logging config
+
+# https://stackoverflow.com/questions/533048/how-to-log-source-file-name-and-line-number-in-python
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
     'formatters': {
         'verbose': {
-            'format': '%(asctime)s %(levelname)s %(name)s | %(message)s'
+            'format': '%(asctime)s %(levelname)s %(filename)s:%(lineno)d | %(message)s'
         }
     },
     'handlers': {
