@@ -9,7 +9,6 @@ from ironoxide import settings
 
 HERE = Path(__file__).parent
 
-logging.basicConfig(level=settings.LOGGING_LEVEL_ROOT, format=('%(asctime)s %(levelname)s %(name)s | %(message)s'))
 logger = logging.getLogger(__file__)
 logger.setLevel(settings.LOGGING_LEVEL_MODULE)
 

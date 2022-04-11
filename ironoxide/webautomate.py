@@ -15,11 +15,10 @@ from ironoxide.models import Answer, Course, Question, Test
 HERE = Path(__file__).parent
 TIMEOUT = 3  # in seconds
 # https://stackoverflow.com/questions/533048/how-to-log-source-file-name-and-line-number-in-python
-logging.basicConfig(level=settings.LOGGING_LEVEL_ROOT, format=('%(asctime)s %(levelname)s %(module)s | %(message)s'))
 logger = logging.getLogger(__file__)
 logger.setLevel(settings.LOGGING_LEVEL_MODULE)
 
-
+# TODO: now we need to implement get_or_create for the course and test models, so that we dont rescrape all the time.
 def populate_tests(course: Course, driver: uc.Chrome):
     """ Populates the tests for this course by searching the activity pane. Assumes driver is on the course page """
 

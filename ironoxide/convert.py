@@ -12,7 +12,6 @@ from ironoxide import settings, utils
 
 HERE = Path(__file__).parent
 
-logging.basicConfig(level=settings.LOGGING_LEVEL_ROOT, format=('%(asctime)s %(levelname)s %(name)s | %(message)s'))
 logging.getLogger('pdfminer').setLevel(logging.WARNING)  # for some reason it logs so much random stuff to info
 logger = logging.getLogger(__file__)
 logger.setLevel(settings.LOGGING_LEVEL_MODULE)
