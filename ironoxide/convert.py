@@ -21,17 +21,21 @@ def ocr(image):
     return pytesseract.image_to_string(image, lang='eng', config=f"--oem 1")
 
 
-def main(file_path, ocr=False):
+def convert(file_path, ocr=False) -> Path:
     """ Converts a pdf to a jsonl file
 
     Args:
         file_path (PosixPath, str): Absolute path to the pdf file
         ocr (bool, optional): If the OCR method should be used to extract text instead of the pdfminer method. Defaults to False.
+
+    Returns:
+        Path: Absolute path to the output jsonl file
     """
 
     logger.info(f'Converting {file_path} to jsonl')
 
     MIN_WORDS = 5
+    MAX_CHARS = 2000
     OCR_PROCESSES = 8
 
     start = time.perf_counter()
@@ -53,20 +57,21 @@ def main(file_path, ocr=False):
                 fulltext += page.extract_text() + '\n'
 
         # format and filter output and write to file
-        sentences = fulltext.split('.')
+        # sentences = fulltext.split('.')
+        sentences = fulltext.split('.\n') # this works best so far
         output = []
         for sentence in sentences:
-            if len(sentence.split(' ')) > MIN_WORDS:
-                output.append({'text': utils.clean_str(sentence)})
-        logger.debug(f'Got PDF text in {time.perf_counter() - start:.3f}s')
+            if len(sentence.replace('.', '').split(' ')) > MIN_WORDS:
+                output.append({'text': utils.clean_str(sentence[:MAX_CHARS])})
+        # logger.debug(f'Got PDF text in {time.perf_counter() - start:.3f}s')
 
     output_path = settings.DATA_PATH/'output.jsonl'
     with open(output_path, 'w') as f:
         for line in output:
             f.write(json.dumps(line) + '\n')
     logger.debug(f'Saved output in {time.perf_counter() - start:.3f}s')
-    return str(output_path)
+    return output_path
 
 
 if __name__ == '__main__':
-    main(HERE.parent/'pycoursebook.pdf')
+    convert(HERE.parent/'pycoursebook.pdf')

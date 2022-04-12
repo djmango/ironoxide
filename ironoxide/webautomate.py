@@ -1,22 +1,28 @@
 import logging
 from pathlib import Path
+import time
+from urllib import parse
 
+import openai
 import undetected_chromedriver as uc
 from bs4 import BeautifulSoup
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
-from urllib import parse
+from thefuzz import process
 
 from ironoxide import settings
 from ironoxide.models import Answer, Course, Question, Test
 
+# TODO: id like to add colour to the logging
 # setup
 HERE = Path(__file__).parent
 TIMEOUT = 3  # in seconds
 logger = logging.getLogger(__file__)
 logger.setLevel(settings.LOGGING_LEVEL_MODULE)
+openai.api_key = settings.OPENAI_API_KEY
+
 
 def populate_tests(course: Course, driver: uc.Chrome):
     """ Populates the tests for this course by searching the activity pane. Assumes driver is on the course page """
@@ -56,7 +62,6 @@ def populate_tests(course: Course, driver: uc.Chrome):
         else:
             logger.debug(f'Found test {test.title}')
 
-
         # Ensure we can complete this test
         if test.getElement().find('div', {'class': 'availabilityinfo isrestricted'}) is None and test.getElement().find('span', {'class': 'autocompletion'}) is not None:
             logger.debug(f'{test.title} is completable..')
@@ -73,6 +78,7 @@ def populate_tests(course: Course, driver: uc.Chrome):
         test.save()
         tests.append(test)
     return tests
+
 
 def do_test(test: Test, driver: uc.Chrome):
     # wait for load
@@ -106,14 +112,20 @@ def do_test(test: Test, driver: uc.Chrome):
             logger.debug(f'Found question {question.title}')
 
         # populate question text
-        driver.get(question.url)
+        while True: # sometimes we get an alert asking if we want to save changes, so close and wait for that
+            time.sleep(1)
+            try:
+                alert = driver.switch_to_alert()
+                alert.dismiss()
+            except:
+                driver.get(question.url)
+                break
         question_block = BeautifulSoup(WebDriverWait(driver, TIMEOUT).until(ec.presence_of_element_located((By.XPATH, "//div[contains(@class, 'formulation clearfix')]"))).get_attribute('innerHTML'), features='lxml')
         question.text = question_block.find('div', {'class': 'qtext'}).text
         question.save()
-        
+
         # populate answers
         answer_block = question_block.find('div', {'class': 'answer'})
-        # answers = [Answer.create(question, i, x) for i, x in enumerate(list(answer_block.find_all('div')))]
         answer_elements: list[BeautifulSoup] = list(answer_block.find_all('div', {'class': 'flex-fill ml-1'}))
         answers: list[Answer] = []
         for k, answer_element in enumerate(answer_elements):
@@ -132,9 +144,52 @@ def do_test(test: Test, driver: uc.Chrome):
         # now its time to get the answer from our answering machine
         logger.debug(f'Getting answer for question {i+1}/{len(question_elements)}')
 
-        # NOTE for next time to pick up on, so we now need to populate the questions and answers, and create a method to select them. after that we need to store the selected answers in a csv file. or somethign. data storage is two sessions down the line.
-        # one more thing, id like to add colour to the logging
+        all_verified = True if all([x.verified for x in answers]) else False
+        for answer in answers:
+            if answer.correct:
+                break
+        
+        # if we dont have a saved answer then we need to get one
+        if not answer.correct:
+            response = openai.Answer.create(
+                search_model='ada', 
+                model='davinci', 
+                question=question.text, 
+                file=test.course.textbook_id,
+                examples_context="In 2017, U.S. life expectancy was 78.6 years.", 
+                examples=[["What is human life expectancy in the United States?", "78 years."]], 
+                max_rerank=200,
+                max_tokens=max([len(x.text) for x in answers])/3, # tokens are usually 3 ish chars
+                stop=["\n", "<|endoftext|>"]
+            )
 
+            # levenshtein distance to match the openai answer to our answer
+            answer, score = process.extractOne(response['answers'][0], [x.text for x in answers])
+            # get our object back since we were selecting  by text
+            answer = answers[[x.text for x in answers].index(answer)]
+            answer.correct = True
+        
+        # click it!
+        answer_i = answers.index(answer)
+        answer_sel_elements = driver.find_elements(By.XPATH, "//div[contains(@class, 'flex-fill ml-1')]")
+        answer_sel_elements[answer_i].click()
+        logger.info(f'Selected answer {answer.text}')
+
+        answer.save()
+        questions.append(question)
+
+    # cool so now weve answered all the questions, lets submit the test
+    test_submit_1 = driver.find_element(By.XPATH, "//input[contains(@class, 'mod_quiz-next-nav btn btn-primary')]")
+    test_submit_1.click()
+
+
+    test_submit_2 = WebDriverWait(driver, TIMEOUT).until(ec.presence_of_element_located((By.XPATH, "//button[contains(@class, 'btn btn-secondary') and text() = 'Submit all and finish']")))
+    test_submit_2.click()
+
+    test_submit_3 = WebDriverWait(driver, TIMEOUT).until(ec.presence_of_element_located((By.XPATH, "//button[contains(@class, 'btn btn-primary') and text() = 'Submit all and finish']")))
+    test_submit_3.click()
+    logger.info('Submitted test!')
+    
 
 def getValidSelection(selectables: list[str], query_string: str, default_selection_i: int = 0) -> int:
     """_summary_
@@ -216,7 +271,7 @@ def main():
     # Get list of active courses elements
     coursesPane = BeautifulSoup(WebDriverWait(driver, TIMEOUT).until(ec.presence_of_element_located((By.ID, 'courses-active'))).get_attribute('innerHTML'), features='lxml')
     course_elements = list(coursesPane.find_all('a', {'class': 'courseitem'}))
-    
+
     # Get or create Course objects
     courses: list[Course] = []
     for course_element in course_elements:

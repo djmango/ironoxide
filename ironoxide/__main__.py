@@ -23,5 +23,5 @@ def cli(args: argparse.Namespace):
 
     if args.convert:
         # path should already be validated
-        convert(args.convert)
+        convert.convert(args.convert)
         # upload and associate with course

@@ -1,5 +1,15 @@
+import logging
+from pathlib import Path
+
+import openai
 from bs4 import BeautifulSoup
 from django.db import models
+
+import ironoxide.settings as settings
+from ironoxide.convert import convert
+
+logger = logging.getLogger(__file__)
+logger.setLevel(settings.LOGGING_LEVEL_MODULE)
 
 # https://www.webforefront.com/django/modelsoutsidemodels.html
 
@@ -21,11 +31,22 @@ class IU_PageElement(models.Model):
 class Course(IU_PageElement):
     title = models.CharField(max_length=255, unique=True)
     iu_id = models.IntegerField(unique=True)
+    textbook_id = models.CharField(max_length=32, blank=True, null=True)
 
     def populate(self, title: str, element: BeautifulSoup):
         self.title = str(title)
         self.element = str(element)
         self.url = element['href'] if 'href' in element.attrs else None
+        return self
+        
+    def upload(self, file_path: Path = settings.DATA_PATH/'colab.pdf'):
+        output_path = convert(file_path)
+        response = openai.File.create(file=open(output_path), purpose='answers', user_provided_filename=f'{self.title}_textbook.jsonl')
+        logger.debug(response)
+        if response['status'] == 'uploaded':
+            self.textbook_id = response['id']
+        else:
+            raise ValueError(f'OpenAI upload failed: {response}')
         return self
 
     def __repr__(self) -> str:
@@ -77,6 +98,7 @@ class Answer(IU_PageElement):
         self.question = question
         self.title = str(self.number)
         self.element = str(element)
+        self.text = element.text
         return self
 
     def __repr__(self) -> str:

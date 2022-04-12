@@ -1,10 +1,15 @@
 """ ironoxide consts and settings """
-import django
-from pathlib import Path
+import sys
+
+# Turn off bytecode generation
+sys.dont_write_bytecode = True
+
 import json
 import logging
 import os
-import sys
+from pathlib import Path
+
+import django
 
 # setup
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'ironoxide.settings')
@@ -20,6 +25,7 @@ creds = json.load(open(DATA_PATH/'creds.json', 'r'))
 IU_USER = creds['iu_user']
 IU_PASS = creds['iu_pass']
 OPENAI_API_KEY = creds['openai_api_key']
+os.environ['OPENAI_API_KEY'] = OPENAI_API_KEY
 
 # django
 SECRET_KEY = creds['django_secret_key']
