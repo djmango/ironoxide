@@ -19,12 +19,14 @@ class IU_PageElement(models.Model):
 
 
 class Course(IU_PageElement):
+    title = models.CharField(max_length=255, unique=True)
+    iu_id = models.IntegerField(unique=True)
 
-    @classmethod
-    def create(cls, title: str, element: BeautifulSoup):
-        course = cls(title=str(title), element=str(element))
-        course.url = element['href'] if 'href' in element.attrs else None
-        return course
+    def populate(self, title: str, element: BeautifulSoup):
+        self.title = str(title)
+        self.element = str(element)
+        self.url = element['href'] if 'href' in element.attrs else None
+        return self
 
     def __repr__(self) -> str:
         return f'<{self.__class__.__name__}: {self.title}>'
@@ -32,16 +34,16 @@ class Course(IU_PageElement):
 
 class Test(IU_PageElement):
     course = models.ForeignKey(Course, on_delete=models.CASCADE)
-    iu_id = models.CharField(max_length=64)
+    iu_id = models.CharField(max_length=64, unique=True)
     completable = models.BooleanField(default=False)
     completed = models.BooleanField(default=False)
 
-    @classmethod
-    def create(cls, course: Course, title: str, element: BeautifulSoup, completable: bool = False, completed: bool = False):
-        test = cls(course=course, title=str(title), element=str(element), completable=completable, completed=completed)
-        test.url = element['href'] if 'href' in element.attrs else None
-        test.iu_id = element.attrs['id']
-        return test
+    def populate(self, course: Course, title: str, element: BeautifulSoup):
+        self.course = course
+        self.title = title
+        self.element = str(element)
+        self.url = element['href'] if 'href' in element.attrs else None
+        return self
 
     def __repr__(self) -> str:
         return f'<{self.__class__.__name__}: {self.title}>'
@@ -49,29 +51,33 @@ class Test(IU_PageElement):
 
 class Question(IU_PageElement):
     test = models.ForeignKey(Test, on_delete=models.CASCADE)
+    number = models.IntegerField()
     text = models.TextField()
     answered = models.BooleanField(default=False)
 
-    @classmethod
-    def create(cls, test: Test, title: str, element: BeautifulSoup, text: str = '', answered: bool = False):
-        question = cls(test=test, title=str(title), element=str(element), text=text, answered=answered)
-        question.url = element['href'] if 'href' in element.attrs else None
-        return question
+    def populate(self, test: Test, element: BeautifulSoup):
+        self.test = test
+        self.title = str(self.number)
+        self.element = str(element)
+        self.url = self.test.url + f'&page={self.number}'
+        return self
 
     def __repr__(self) -> str:
-        return f'<{self.__class__.__name__}: {self.text}>' if self.text and self.text != '' else f'<{self.__class__.__name__}: {self.title}>'
+        return f'<{self.__class__.__name__}: {self.text}>' if self.text and self.text != '' else f'<{self.__class__.__name__}: {self.number}>'
 
 
 class Answer(IU_PageElement):
     question = models.ForeignKey(Question, on_delete=models.CASCADE)
+    number = models.IntegerField()
     text = models.TextField()
     correct = models.BooleanField(default=False)
     verified = models.BooleanField(default=False)
 
-    @classmethod
-    def create(cls, question: Question, title: str, element: BeautifulSoup, text: str = '', correct: bool = False, verified: bool = False):
-        answer = cls(question=question, title=str(title), element=str(element), text=text, correct=correct, verified=verified)
-        return answer
+    def populate(self, question: Question, element: BeautifulSoup):
+        self.question = question
+        self.title = str(self.number)
+        self.element = str(element)
+        return self
 
     def __repr__(self) -> str:
         return f'<{self.__class__.__name__}: {self.text}>' if self.text and self.text != '' else f'<{self.__class__.__name__}: {self.title}>'

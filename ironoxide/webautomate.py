@@ -7,6 +7,7 @@ from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
+from urllib import parse
 
 from ironoxide import settings
 from ironoxide.models import Answer, Course, Question, Test
@@ -17,7 +18,6 @@ TIMEOUT = 3  # in seconds
 logger = logging.getLogger(__file__)
 logger.setLevel(settings.LOGGING_LEVEL_MODULE)
 
-# TODO: now we need to implement get_or_create for the course and test models, so that we dont rescrape all the time.
 def populate_tests(course: Course, driver: uc.Chrome):
     """ Populates the tests for this course by searching the activity pane. Assumes driver is on the course page """
 
@@ -34,23 +34,34 @@ def populate_tests(course: Course, driver: uc.Chrome):
         test_activity = activities[selection]
 
     # Expand test panel if not already expanded
-    the_toggle = test_activity['element'].find('span', {'class': 'the_toggle'})
-    if the_toggle['aria-expanded'] == 'false':
+    test_panel_toggle = test_activity['element'].find('span', {'class': 'the_toggle'})
+    if test_panel_toggle['aria-expanded'] == 'false':
         logger.debug('Expanding tests panel..')
-        element = driver.find_element(By.ID, the_toggle['id'])
+        element = driver.find_element(By.ID, test_panel_toggle['id'])
         element.click()
 
     # Get list of tests and test titles from test panel
-    tests = [Test.create(course, str(x.find('span', {'class': 'instancename'}).text).strip(), x) for x in list(test_activity['element'].find('ul', {'class': ['section', 'img-text']}).find_all('li'))]
+    test_elements = list(test_activity['element'].find('ul', {'class': ['section', 'img-text']}).find_all('li'))
 
     # Check if any tests are completed. If so, mark them as such
-    for test in tests:
-        # ensure we can complete this test
+    tests: list[Test] = []
+    for test_element in test_elements:
+        iu_id = test_element.attrs['id']
+        test: Test
+        test, created = Test.objects.get_or_create(course=course, iu_id=iu_id)
+        test.populate(course, str(test_element.find('span', {'class': 'instancename'}).text).strip(), test_element)
+
+        if created:
+            logger.debug(f'Created test {test.title}')
+        else:
+            logger.debug(f'Found test {test.title}')
+
+
+        # Ensure we can complete this test
         if test.getElement().find('div', {'class': 'availabilityinfo isrestricted'}) is None and test.getElement().find('span', {'class': 'autocompletion'}) is not None:
             logger.debug(f'{test.title} is completable..')
             test.completable = True
             # then check if it is completed
-            # completion = next(test.getElement().find('span', {'class': 'autocompletion'}).children).attrs['alt']
             if next(test.getElement().find('span', {'class': 'autocompletion'}).children).attrs['alt'][:10] == 'Completed:':
                 logger.debug(f'{test.title} is completed!')
                 test.completed = True
@@ -60,6 +71,7 @@ def populate_tests(course: Course, driver: uc.Chrome):
             logger.debug(f'{test.title} is not completable..')
 
         test.save()
+        tests.append(test)
     return tests
 
 def do_test(test: Test, driver: uc.Chrome):
@@ -76,25 +88,49 @@ def do_test(test: Test, driver: uc.Chrome):
 
     # populate questions
     question_navigation_block = BeautifulSoup(WebDriverWait(driver, TIMEOUT).until(ec.presence_of_element_located((By.XPATH, "//div[contains(@class, 'qn_buttons clearfix multipages')]"))).get_attribute('innerHTML'), features='lxml')
-    questions: list[Question] = [Question.create(test, i, x) for i, x in enumerate(list(question_navigation_block.find_all('a')))]
+    test.url = driver.current_url
+    test.save()
+    question_elements: list[BeautifulSoup] = list(question_navigation_block.find_all('a'))
 
-    # make sure all the question urls are fully qualified
-    for i, question in enumerate(questions):
-        if not question.url or not question.url.startswith('https://'):
-            question.url = questions[i-1].url.rsplit('&')[0] + f'&page={i}' # NOTE: potentially, the first element could have the broken url, which means that this fix will not work as expected. have to add conditional
+    questions: list[Question] = []
+    for i, question_element in enumerate(question_elements):
+        logger.debug(f'Question {i+1}/{len(question_elements)}')
 
-    # go to each question page and populate answers
-    for i, question in enumerate(questions):
-        logger.debug(f'Question {i+1}/{len(questions)}')
+        question: Question
+        question, created = Question.objects.get_or_create(test=test, number=i)
+        question.populate(test, question_element)
+
+        if created:
+            logger.debug(f'Created question {question.title}')
+        else:
+            logger.debug(f'Found question {question.title}')
+
+        # populate question text
         driver.get(question.url)
         question_block = BeautifulSoup(WebDriverWait(driver, TIMEOUT).until(ec.presence_of_element_located((By.XPATH, "//div[contains(@class, 'formulation clearfix')]"))).get_attribute('innerHTML'), features='lxml')
         question.text = question_block.find('div', {'class': 'qtext'}).text
-        answer_block = question_block.find('div', {'class': 'answer'})
         question.save()
-        answers = [Answer.create(question, i, x) for i, x in enumerate(list(answer_block.find_all('div')))]
+        
+        # populate answers
+        answer_block = question_block.find('div', {'class': 'answer'})
+        # answers = [Answer.create(question, i, x) for i, x in enumerate(list(answer_block.find_all('div')))]
+        answer_elements: list[BeautifulSoup] = list(answer_block.find_all('div', {'class': 'flex-fill ml-1'}))
+        answers: list[Answer] = []
+        for k, answer_element in enumerate(answer_elements):
+            answer: Answer
+            answer, created = Answer.objects.get_or_create(question=question, number=k)
+            answer.populate(question, answer_element)
+            answer.save()
+
+            if created:
+                logger.debug(f'Created answer {answer.title}')
+            else:
+                logger.debug(f'Found answer {answer.title}')
+
+            answers.append(answer)
 
         # now its time to get the answer from our answering machine
-        logger.debug(f'Getting answer for question {i+1}/{len(questions)}')
+        logger.debug(f'Getting answer for question {i+1}/{len(question_elements)}')
 
         # NOTE for next time to pick up on, so we now need to populate the questions and answers, and create a method to select them. after that we need to store the selected answers in a csv file. or somethign. data storage is two sessions down the line.
         # one more thing, id like to add colour to the logging
@@ -168,8 +204,8 @@ def main():
     for attempt in range(5):
         try:
             # deny cookies
-            element = WebDriverWait(driver, timeout=10).until(ec.presence_of_element_located((By.ID, 'uc-a-deny-banner')))
-            element.click()
+            deny_cookies = WebDriverWait(driver, timeout=10).until(ec.presence_of_element_located((By.ID, 'uc-a-deny-banner')))
+            deny_cookies.click()
             logger.info('Denied cookies..')
         except Exception as e:
             logger.error(e)
@@ -177,9 +213,25 @@ def main():
         else:
             break
 
-    # Get list of active courses
+    # Get list of active courses elements
     coursesPane = BeautifulSoup(WebDriverWait(driver, TIMEOUT).until(ec.presence_of_element_located((By.ID, 'courses-active'))).get_attribute('innerHTML'), features='lxml')
-    courses = [Course.create(str(x.text).strip().split('\n')[1], x) for x in list(coursesPane.find_all('a', {'class': 'courseitem'}))]
+    course_elements = list(coursesPane.find_all('a', {'class': 'courseitem'}))
+    
+    # Get or create Course objects
+    courses: list[Course] = []
+    for course_element in course_elements:
+        iu_id = int(parse.parse_qs(parse.urlparse(course_element['href']).query)['id'][0])
+        course: Course
+        course, created = Course.objects.get_or_create(iu_id=iu_id)
+        course.populate(str(course_element.text).strip().split('\n')[1], course_element)
+        course.save()
+
+        if created:
+            logger.debug(f'Created course {course.title}')
+        else:
+            logger.debug(f'Found course {course.title}')
+
+        courses.append(course)
 
     # Ensure we get a valid selection
     selection = getValidSelection(([x.title for x in courses]), 'Select course', 0)
@@ -191,7 +243,6 @@ def main():
     driver.get(str(course.url))
 
     # get tests
-    course.save()
     tests = populate_tests(course, driver)
 
     # go to the first incomplete test
