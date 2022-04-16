@@ -1,5 +1,6 @@
 import logging
 from pathlib import Path
+import random
 import time
 from urllib import parse
 
@@ -43,7 +44,7 @@ def populate_tests(course: Course, driver: uc.Chrome):
     test_panel_toggle = test_activity['element'].find('span', {'class': 'the_toggle'})
     if test_panel_toggle['aria-expanded'] == 'false':
         logger.debug('Expanding tests panel..')
-        element = driver.find_element(By.ID, test_panel_toggle['id'])
+        element = driver.find_element(By.ID, test_panel_toggle.find('h3')['id'])
         element.click()
 
     # Get list of tests and test titles from test panel
@@ -100,29 +101,29 @@ def do_test(test: Test, driver: uc.Chrome):
 
     questions: list[Question] = []
     for i, question_element in enumerate(question_elements):
-        logger.debug(f'Question {i+1}/{len(question_elements)}')
+        logger.debug(f'-- Question {i+1}/{len(question_elements)} --')
 
-        question: Question
-        question, created = Question.objects.get_or_create(test=test, number=i)
-        question.populate(test, question_element)
-
-        if created:
-            logger.debug(f'Created question {question.title}')
+        # move to the question
+        if i == 0:
+            driver.get(test.url + '&page=0') # driver.get causes the currently selected answer to be discrarded - must use next page button, unless we are on the first page
         else:
-            logger.debug(f'Found question {question.title}')
-
-        # populate question text
-        while True: # sometimes we get an alert asking if we want to save changes, so close and wait for that
-            time.sleep(1)
-            try:
-                alert = driver.switch_to_alert()
-                alert.dismiss()
-            except:
-                driver.get(question.url)
-                break
+            nextquestion = driver.find_element(By.XPATH, "//input[contains(@class, 'mod_quiz-next-nav btn btn-primary')]")
+            nextquestion.click()
+        
+        # get question text
         question_block = BeautifulSoup(WebDriverWait(driver, TIMEOUT).until(ec.presence_of_element_located((By.XPATH, "//div[contains(@class, 'formulation clearfix')]"))).get_attribute('innerHTML'), features='lxml')
-        question.text = question_block.find('div', {'class': 'qtext'}).text
+        question_new_text = question_block.find('div', {'class': 'qtext'}).text
+
+        # find or create question in database
+        question: Question
+        question, q_created = Question.objects.get_or_create(test=test, text=question_new_text)
+        question.populate(test, question_element, i)
         question.save()
+
+        if q_created:
+            logger.debug(f'Created question {i+1}: {question.text}')
+        else:
+            logger.debug(f'Found question {i+1}: {question.text}')
 
         # populate answers
         answer_block = question_block.find('div', {'class': 'answer'})
@@ -130,36 +131,36 @@ def do_test(test: Test, driver: uc.Chrome):
         answers: list[Answer] = []
         for k, answer_element in enumerate(answer_elements):
             answer: Answer
-            answer, created = Answer.objects.get_or_create(question=question, number=k)
-            answer.populate(question, answer_element)
+            answer, a_created = Answer.objects.get_or_create(question=question, text=answer_element.text)
+            answer.populate(question, answer_element, k)
+            # https://stackoverflow.com/questions/46063262/find-differences-between-two-python-objects
             answer.save()
 
-            if created:
-                logger.debug(f'Created answer {answer.title}')
+            if a_created:
+                logger.debug(f'Created answer {k+1} {answer.text}')
             else:
-                logger.debug(f'Found answer {answer.title}')
+                logger.debug(f'Found answer {k+1}: {answer.text}')
 
             answers.append(answer)
 
         # now its time to get the answer from our answering machine
-        logger.debug(f'Getting answer for question {i+1}/{len(question_elements)}')
+        logger.debug('Getting correct answer..')
 
         all_verified = True if all([x.verified for x in answers]) else False
         for answer in answers:
             if answer.correct:
                 break
-        
-        # if we dont have a saved answer then we need to get one
-        if not answer.correct:
+        else: # if we dont have a saved answer then we need to get one using ai
+            full_question = question.text + ":" + "\n".join([x.text for x in answers])
             response = openai.Answer.create(
-                search_model='ada', 
-                model='davinci', 
-                question=question.text, 
+                search_model='ada',
+                model='davinci',
+                question=full_question,
                 file=test.course.textbook_id,
-                examples_context="In 2017, U.S. life expectancy was 78.6 years.", 
-                examples=[["What is human life expectancy in the United States?", "78 years."]], 
-                max_rerank=200,
-                max_tokens=max([len(x.text) for x in answers])/3, # tokens are usually 3 ish chars
+                examples_context="In 2017, U.S. life expectancy was 78.6 years.",
+                examples=[["What is human life expectancy in the United States?", "78 years."]],
+                max_rerank=20,
+                max_tokens=int(max([len(x.text) for x in answers])/3),  # tokens are usually 3 ish chars
                 stop=["\n", "<|endoftext|>"]
             )
 
@@ -168,28 +169,45 @@ def do_test(test: Test, driver: uc.Chrome):
             # get our object back since we were selecting  by text
             answer = answers[[x.text for x in answers].index(answer)]
             answer.correct = True
-        
+            answer.save()
+
         # click it!
         answer_i = answers.index(answer)
         answer_sel_elements = driver.find_elements(By.XPATH, "//div[contains(@class, 'flex-fill ml-1')]")
         answer_sel_elements[answer_i].click()
         logger.info(f'Selected answer {answer.text}')
 
-        answer.save()
         questions.append(question)
+        time.sleep(random.randrange(1000, 3500)/1000) # wait for save
 
     # cool so now weve answered all the questions, lets submit the test
     test_submit_1 = driver.find_element(By.XPATH, "//input[contains(@class, 'mod_quiz-next-nav btn btn-primary')]")
     test_submit_1.click()
 
-
     test_submit_2 = WebDriverWait(driver, TIMEOUT).until(ec.presence_of_element_located((By.XPATH, "//button[contains(@class, 'btn btn-secondary') and text() = 'Submit all and finish']")))
     test_submit_2.click()
 
-    test_submit_3 = WebDriverWait(driver, TIMEOUT).until(ec.presence_of_element_located((By.XPATH, "//button[contains(@class, 'btn btn-primary') and text() = 'Submit all and finish']")))
+    test_submit_3_block = BeautifulSoup(WebDriverWait(driver, TIMEOUT).until(ec.presence_of_element_located((By.XPATH, "//div[contains(@class, 'confirmation-buttons form-inline justify-content-around')]"))).get_attribute('innerHTML'), features='lxml')
+    test_submit_3_id = test_submit_3_block.find_all('input')[0]['id']  # 0 is accept, 1 is cancel
+    test_submit_3 = WebDriverWait(driver, TIMEOUT).until(ec.presence_of_element_located((By.ID, test_submit_3_id)))
     test_submit_3.click()
     logger.info('Submitted test!')
-    
+
+    # verify our results
+    test_results_block = BeautifulSoup(WebDriverWait(driver, TIMEOUT).until(ec.presence_of_element_located((By.XPATH, "//form[contains(@class, 'questionflagsaveform')]"))).get_attribute('innerHTML'), features='lxml')
+    results = test_results_block.find_all('div', {'class': 'content'})
+
+    for i, result in enumerate(results):
+        checking_answer: Answer = Answer.objects.filter(question=questions[i], correct=True).first()
+        if 'correct' in result.attrs['class'] or 'incorrect' in result.attrs['class']: # sometimes the element with the class is parent, sometimes its our current element
+            is_correct = True if 'correct' in result.attrs['class'] else False
+        else:
+            is_correct = True if 'correct' in result.parent.attrs['class'] else False
+            
+        checking_answer.correct = is_correct
+        checking_answer.verified = True
+        checking_answer.save()
+
 
 def getValidSelection(selectables: list[str], query_string: str, default_selection_i: int = 0) -> int:
     """_summary_
@@ -231,7 +249,9 @@ def getValidSelection(selectables: list[str], query_string: str, default_selecti
 
 
 def main():
-    driver = uc.Chrome(use_subprocess=True)
+    options = uc.ChromeOptions()
+    # options.add_argument('--disable-notifications')
+    driver = uc.Chrome(use_subprocess=True, options=options)
 
     # -- Login --
 
@@ -305,6 +325,7 @@ def main():
         if test.completable and not test.completed:
             logger.info(f'Going to test {test.title}..')
             driver.get(str(test.getElement().find('a')['href']))
+            # driver.execute_script("window.onbeforeunload = function() {};") # disable alerts
             break
 
     # -- Test --

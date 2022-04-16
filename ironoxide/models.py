@@ -72,12 +72,13 @@ class Test(IU_PageElement):
 
 class Question(IU_PageElement):
     test = models.ForeignKey(Test, on_delete=models.CASCADE)
-    number = models.IntegerField()
+    number = models.IntegerField(blank=True, null=True)
     text = models.TextField()
     answered = models.BooleanField(default=False)
 
-    def populate(self, test: Test, element: BeautifulSoup):
+    def populate(self, test: Test, element: BeautifulSoup, number: int):
         self.test = test
+        self.number = number
         self.title = str(self.number)
         self.element = str(element)
         self.url = self.test.url + f'&page={self.number}'
@@ -89,13 +90,14 @@ class Question(IU_PageElement):
 
 class Answer(IU_PageElement):
     question = models.ForeignKey(Question, on_delete=models.CASCADE)
-    number = models.IntegerField()
+    number = models.IntegerField(blank=True, null=True)
     text = models.TextField()
     correct = models.BooleanField(default=False)
     verified = models.BooleanField(default=False)
 
-    def populate(self, question: Question, element: BeautifulSoup):
+    def populate(self, question: Question, element: BeautifulSoup, number: int):
         self.question = question
+        self.number = number
         self.title = str(self.number)
         self.element = str(element)
         self.text = element.text
