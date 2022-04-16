@@ -146,28 +146,29 @@ def do_test(test: Test, driver: uc.Chrome):
         # now its time to get the answer from our answering machine
         logger.debug('Getting correct answer..')
 
-        all_verified = True if all([x.verified for x in answers]) else False
         for answer in answers:
             if answer.correct:
                 break
-        else: # if we dont have a saved answer then we need to get one using ai
-            full_question = question.text + ":" + "\n".join([x.text for x in answers])
-            response = openai.Answer.create(
-                search_model='ada',
-                model='davinci',
-                question=full_question,
-                file=test.course.textbook_id,
-                examples_context="In 2017, U.S. life expectancy was 78.6 years.",
-                examples=[["What is human life expectancy in the United States?", "78 years."]],
-                max_rerank=20,
-                max_tokens=int(max([len(x.text) for x in answers])/3),  # tokens are usually 3 ish chars
-                stop=["\n", "<|endoftext|>"]
-            )
+        else: # if we dont have a saved answer then we need to get one using ai (OR RANDOMLY)
+            answer = random.choice([x for x in answers if not x.verified]) # just choose a random unverified answer and roll with it, we will find out later if its correct and store it for next time
 
-            # levenshtein distance to match the openai answer to our answer
-            answer, score = process.extractOne(response['answers'][0], [x.text for x in answers])
-            # get our object back since we were selecting  by text
-            answer = answers[[x.text for x in answers].index(answer)]
+            # full_question = question.text + ":" + "\n".join([x.text for x in answers])
+            # response = openai.Answer.create( # TODO: so next thing is we need to make a better answering machine that will account for validated wrong answers
+            #     search_model='ada',
+            #     model='davinci',
+            #     question=full_question,
+            #     file=test.course.textbook_id,
+            #     examples_context="In 2017, U.S. life expectancy was 78.6 years.",
+            #     examples=[["What is human life expectancy in the United States?", "78 years."]],
+            #     max_rerank=20,
+            #     max_tokens=int(max([len(x.text) for x in answers])/3),  # tokens are usually 3 ish chars
+            #     stop=["\n", "<|endoftext|>"]
+            # )
+
+            # # levenshtein distance to match the openai answer to our answer
+            # answer, score = process.extractOne(response['answers'][0], [x.text for x in answers])
+            # # get our object back since we were selecting  by text
+            # answer = answers[[x.text for x in answers].index(answer)]
             answer.correct = True
             answer.save()
 
@@ -197,16 +198,33 @@ def do_test(test: Test, driver: uc.Chrome):
     test_results_block = BeautifulSoup(WebDriverWait(driver, TIMEOUT).until(ec.presence_of_element_located((By.XPATH, "//form[contains(@class, 'questionflagsaveform')]"))).get_attribute('innerHTML'), features='lxml')
     results = test_results_block.find_all('div', {'class': 'content'})
 
+    total_correct = 0
     for i, result in enumerate(results):
         checking_answer: Answer = Answer.objects.filter(question=questions[i], correct=True).first()
         if 'correct' in result.attrs['class'] or 'incorrect' in result.attrs['class']: # sometimes the element with the class is parent, sometimes its our current element
             is_correct = True if 'correct' in result.attrs['class'] else False
         else:
             is_correct = True if 'correct' in result.parent.attrs['class'] else False
-            
+
         checking_answer.correct = is_correct
         checking_answer.verified = True
         checking_answer.save()
+
+        if is_correct:
+            total_correct += 1
+
+    # finish review and return
+    finish_review = driver.find_element(By.XPATH, "//a[contains(@class, 'mod_quiz-next-nav')]")
+    finish_review.click()
+    time.sleep(.5) # TODO: this neeeds to be fixed
+
+    logger.info(f'{total_correct}/{len(questions)} correct')
+    if total_correct/len(questions) > 0.8:
+        logger.info('Test passed!')
+        return True
+    else:
+        logger.info('Test failed!')
+        return False
 
 
 def getValidSelection(selectables: list[str], query_string: str, default_selection_i: int = 0) -> int:
@@ -321,16 +339,20 @@ def main():
     tests = populate_tests(course, driver)
 
     # go to the first incomplete test
-    for test in tests:
-        if test.completable and not test.completed:
-            logger.info(f'Going to test {test.title}..')
-            driver.get(str(test.getElement().find('a')['href']))
-            # driver.execute_script("window.onbeforeunload = function() {};") # disable alerts
-            break
-
     # -- Test --
+    for test in tests:
+        # if test.completable and not test.completed:
+        if not test.completed: # disable completeable check rn because i dont have an updater for that yet
+            logger.info(f'Going to test {test.title}..')
+            test.url = str(test.getElement().find('a')['href'])
+            test.save()
 
-    do_test(test, driver)
+            passed = False
+            while not passed:
+                driver.get(test.url)
+                passed = do_test(test, driver)
+                if not passed:
+                    logger.info('Retrying..')
 
     logger.info('Done!')
     driver.quit()
