@@ -63,7 +63,8 @@ class Test(IU_PageElement):
         self.course = course
         self.title = title
         self.element = str(element)
-        self.url = element['href'] if 'href' in element.attrs else None
+        # 'module-186451'
+        self.url = 'https://mycampus.iubh.de/mod/quiz/view.php?id=' + self.iu_id.split('-')[1]
         return self
 
     def __repr__(self) -> str:

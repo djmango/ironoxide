@@ -88,16 +88,17 @@ def do_test(test: Test, driver: uc.Chrome):
     # ensure we are in a Highest Grade test and proceed
     if 'Grading method: Highest grade' not in test_main_page.find('div', {'class': 'quizinfo'}).text:
         logger.error(f'Not in a Highest Grade test ({test.title}), unsafe to continue, exiting..')
-        driver.quit()
+        return
 
     # proceed into the test
-    driver.find_element(By.XPATH, "//button[contains(@type, 'submit')]").click()
+    proceed_button = driver.find_element(By.XPATH, "//button[contains(@type, 'submit')]")
+    proceed_button.click()
 
     # populate questions
     question_navigation_block = BeautifulSoup(WebDriverWait(driver, TIMEOUT).until(ec.presence_of_element_located((By.XPATH, "//div[contains(@class, 'qn_buttons clearfix multipages')]"))).get_attribute('innerHTML'), features='lxml')
-    test.url = driver.current_url
-    test.save()
     question_elements: list[BeautifulSoup] = list(question_navigation_block.find_all('a'))
+
+    test_attempt_url = driver.current_url
 
     questions: list[Question] = []
     for i, question_element in enumerate(question_elements):
@@ -105,7 +106,7 @@ def do_test(test: Test, driver: uc.Chrome):
 
         # move to the question
         if i == 0:
-            driver.get(test.url + '&page=0') # driver.get causes the currently selected answer to be discrarded - must use next page button, unless we are on the first page
+            driver.get(test_attempt_url + '&page=0') # driver.get causes the currently selected answer to be discrarded - must use next page button, unless we are on the first page
         else:
             nextquestion = driver.find_element(By.XPATH, "//input[contains(@class, 'mod_quiz-next-nav btn btn-primary')]")
             nextquestion.click()
@@ -179,7 +180,8 @@ def do_test(test: Test, driver: uc.Chrome):
         logger.info(f'Selected answer {answer.text}')
 
         questions.append(question)
-        time.sleep(random.randrange(1000, 3500)/1000) # wait for save
+        # time.sleep(random.randrange(1000, 3500)/1000) # wait for save
+        time.sleep(random.randrange(2500, 7500)/1000) # wait for save
 
     # cool so now weve answered all the questions, lets submit the test
     test_submit_1 = driver.find_element(By.XPATH, "//input[contains(@class, 'mod_quiz-next-nav btn btn-primary')]")
@@ -219,7 +221,7 @@ def do_test(test: Test, driver: uc.Chrome):
     time.sleep(.5) # TODO: this neeeds to be fixed
 
     logger.info(f'{total_correct}/{len(questions)} correct')
-    if total_correct/len(questions) > 0.8:
+    if total_correct/len(questions) >= 0.8:
         logger.info('Test passed!')
         return True
     else:
@@ -327,7 +329,7 @@ def main():
         courses.append(course)
 
     # Ensure we get a valid selection
-    selection = getValidSelection(([x.title for x in courses]), 'Select course', 0)
+    selection = getValidSelection(([x.title for x in courses]), 'Select course', 1)
     course = courses[selection]
 
     # -- Course --
@@ -344,9 +346,6 @@ def main():
         # if test.completable and not test.completed:
         if not test.completed: # disable completeable check rn because i dont have an updater for that yet
             logger.info(f'Going to test {test.title}..')
-            test.url = str(test.getElement().find('a')['href'])
-            test.save()
-
             passed = False
             while not passed:
                 driver.get(test.url)
